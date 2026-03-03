@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐱 Cebollín Runner — El Juego</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Fredoka', sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    h1 { color: #ffa502; margin: 1rem 0 0.5rem; font-size: 2rem; }
+    .subtitle { color: #a0a0b0; margin-bottom: 1rem; text-align: center; }
+    #score-bar {
+      display: flex;
+      gap: 2rem;
+      margin-bottom: 0.5rem;
+      font-size: 1.2rem;
+    }
+    #score-bar span { color: #ffa502; }
+    canvas {
+      border: 3px solid #ffa502;
+      border-radius: 1rem;
+      background: #0f3460;
+      display: block;
+      max-width: 100%;
+      touch-action: none;
+    }
+    #start-btn {
+      margin-top: 1rem;
+      padding: 1rem 2.5rem;
+      font-family: 'Fredoka', sans-serif;
+      font-size: 1.3rem;
+      background: #ffa502;
+      color: #1a1a2e;
+      border: none;
+      border-radius: 1rem;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    #start-btn:hover { background: #ff6b6b; color: #fff; }
+    .instructions {
+      color: #666;
+      margin-top: 1rem;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    a { color: #ffa502; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>🐱 Cebollín Runner</h1>
+  <p class="subtitle">Esquiva los pepinos (los gatos ODIAN los pepinos)</p>
+  <div id="score-bar">
+    <div>Puntaje: <span id="score">0</span></div>
+    <div>Récord: <span id="highscore">0</span></div>
+  </div>
+  <canvas id="game" width="600" height="300"></canvas>
+  <button id="start-btn">🐱 JUGAR</button>
+  <p class="instructions">
+    Toca la pantalla / Barra espaciadora / Click para saltar<br>
+    Doble salto disponible 🐾
+  </p>
+  <p style="margin-top:2rem"><a href="index.html">← Volver a la Fan Page</a></p>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const highscoreEl = document.getElementById('highscore');
+    const startBtn = document.getElementById('start-btn');
+
+    // Responsive canvas
+    function resizeCanvas() {
+      const maxW = Math.min(600, window.innerWidth - 32);
+      canvas.style.width = maxW + 'px';
+      canvas.style.height = (maxW * 0.5) + 'px';
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Game state
+    let running = false;
+    let score = 0;
+    let highscore = parseInt(localStorage.getItem('cebollin-highscore') || '0');
+    highscoreEl.textContent = highscore;
+    let gameSpeed = 4;
+    let frame = 0;
+
+    // Ground
+    const GROUND_Y = 240;
+
+    // Cebollín (the cat)
+    const cat = {
+      x: 80, y: GROUND_Y, w: 40, h: 40,
+      vy: 0, jumping: false, jumps: 0, maxJumps: 2
+    };
+
+    // Obstacles (cucumbers!)
+    let obstacles = [];
+    let obstacleTimer = 0;
+    const MIN_GAP = 60;
+    const MAX_GAP = 120;
+    let nextObstacle = 80;
+
+    // Particles
+    let particles = [];
+
+    function reset() {
+      cat.y = GROUND_Y; cat.vy = 0; cat.jumping = false; cat.jumps = 0;
+      obstacles = [];
+      particles = [];
+      obstacleTimer = 0;
+      nextObstacle = 80;
+      score = 0;
+      gameSpeed = 4;
+      frame = 0;
+      scoreEl.textContent = '0';
+    }
+
+    function jump() {
+      if (!running) return;
+      if (cat.jumps < cat.maxJumps) {
+        cat.vy = -10;
+        cat.jumping = true;
+        cat.jumps++;
+        // Jump particles
+        for (let i = 0; i < 5; i++) {
+          particles.push({
+            x: cat.x + 20, y: cat.y + 40,
+            vx: (Math.random() - 0.5) * 3,
+            vy: Math.random() * 2 + 1,
+            life: 20,
+            color: cat.jumps === 2 ? '#ff6b6b' : '#ffa502'
+          });
+        }
+      }
+    }
+
+    // Input
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space') { e.preventDefault(); jump(); }
+    });
+    canvas.addEventListener('click', jump);
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); jump(); });
+
+    startBtn.addEventListener('click', () => {
+      if (running) return;
+      reset();
+      running = true;
+      startBtn.textContent = '🏃 Jugando...';
+      loop();
+    });
+
+    function spawnObstacle() {
+      const h = 30 + Math.random() * 30;
+      obstacles.push({
+        x: 620, y: GROUND_Y + 40 - h, w: 25, h: h,
+        scored: false
+      });
+    }
+
+    function drawCat() {
+      // Body
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.roundRect(cat.x, cat.y, cat.w, cat.h, 8);
+      ctx.fill();
+
+      // Stripes (tabby)
+      ctx.fillStyle = '#666';
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(cat.x + 10 + i * 10, cat.y + 5, 4, cat.h - 10);
+      }
+
+      // Ears
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.moveTo(cat.x + 5, cat.y);
+      ctx.lineTo(cat.x + 0, cat.y - 12);
+      ctx.lineTo(cat.x + 14, cat.y);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cat.x + 26, cat.y);
+      ctx.lineTo(cat.x + 40, cat.y - 12);
+      ctx.lineTo(cat.x + 35, cat.y);
+      ctx.fill();
+
+      // Eyes
+      ctx.fillStyle = '#ffeb3b';
+      ctx.beginPath();
+      ctx.arc(cat.x + 14, cat.y + 14, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cat.x + 28, cat.y + 14, 5, 0, Math.PI * 2);
+      ctx.fill();
+      // Pupils
+      ctx.fillStyle = '#111';
+      ctx.beginPath();
+      ctx.arc(cat.x + 15, cat.y + 14, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cat.x + 29, cat.y + 14, 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Collar (orange!)
+      ctx.fillStyle = '#ff6b00';
+      ctx.fillRect(cat.x + 2, cat.y + 28, cat.w - 4, 5);
+      // Bell
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath();
+      ctx.arc(cat.x + 20, cat.y + 35, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tail
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cat.x + cat.w, cat.y + 15);
+      const tailWave = Math.sin(frame * 0.1) * 8;
+      ctx.quadraticCurveTo(cat.x + cat.w + 20, cat.y + tailWave, cat.x + cat.w + 15, cat.y - 5);
+      ctx.stroke();
+    }
+
+    function drawCucumber(obs) {
+      // Cucumber body
+      ctx.fillStyle = '#2e7d32';
+      ctx.beginPath();
+      ctx.roundRect(obs.x, obs.y, obs.w, obs.h, 6);
+      ctx.fill();
+      // Bumps
+      ctx.fillStyle = '#388e3c';
+      for (let i = 0; i < obs.h; i += 12) {
+        ctx.beginPath();
+        ctx.arc(obs.x + obs.w / 2 + 3, obs.y + 6 + i, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Stem
+      ctx.fillStyle = '#8bc34a';
+      ctx.fillRect(obs.x + 8, obs.y - 4, 8, 6);
+    }
+
+    function drawGround() {
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, GROUND_Y + 40, 600, 60);
+      ctx.strokeStyle = '#ffa502';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, GROUND_Y + 40);
+      ctx.lineTo(600, GROUND_Y + 40);
+      ctx.stroke();
+
+      // Moving dots on ground
+      ctx.fillStyle = '#333';
+      for (let i = 0; i < 20; i++) {
+        const gx = ((i * 35) - (frame * gameSpeed) % 35 + 700) % 700 - 50;
+        ctx.fillRect(gx, GROUND_Y + 50, 2, 2);
+      }
+    }
+
+    function drawParticles() {
+      particles.forEach(p => {
+        ctx.globalAlpha = p.life / 20;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    function drawStars() {
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 30; i++) {
+        const sx = (i * 73 + 10) % 600;
+        const sy = (i * 37 + 5) % (GROUND_Y - 20);
+        const twinkle = Math.sin(frame * 0.05 + i) * 0.5 + 0.5;
+        ctx.globalAlpha = twinkle * 0.6;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function collides(a, b) {
+      return a.x < b.x + b.w - 5 &&
+             a.x + a.w > b.x + 5 &&
+             a.y < b.y + b.h - 5 &&
+             a.y + a.h > b.y + 5;
+    }
+
+    function gameOver() {
+      running = false;
+      if (score > highscore) {
+        highscore = score;
+        localStorage.setItem('cebollin-highscore', highscore);
+        highscoreEl.textContent = highscore;
+      }
+      startBtn.textContent = '💀 Otra vez!';
+
+      // Game over text
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(0, 0, 600, 300);
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = '700 36px Fredoka';
+      ctx.textAlign = 'center';
+      ctx.fillText('🥒 ¡PEPINO!', 300, 130);
+      ctx.fillStyle = '#fff';
+      ctx.font = '600 20px Fredoka';
+      ctx.fillText('Cebollín le tiene miedo a los pepinos', 300, 170);
+      ctx.fillStyle = '#ffa502';
+      ctx.fillText('Puntaje: ' + score, 300, 210);
+      ctx.textAlign = 'start';
+    }
+
+    function loop() {
+      if (!running) return;
+
+      ctx.clearRect(0, 0, 600, 300);
+
+      // Background
+      ctx.fillStyle = '#0f3460';
+      ctx.fillRect(0, 0, 600, 300);
+      drawStars();
+
+      // Physics
+      cat.vy += 0.6; // gravity
+      cat.y += cat.vy;
+      if (cat.y >= GROUND_Y) {
+        cat.y = GROUND_Y;
+        cat.vy = 0;
+        cat.jumping = false;
+        cat.jumps = 0;
+      }
+
+      // Obstacles
+      obstacleTimer++;
+      if (obstacleTimer >= nextObstacle) {
+        spawnObstacle();
+        obstacleTimer = 0;
+        nextObstacle = MIN_GAP + Math.random() * (MAX_GAP - MIN_GAP);
+        // Speed up over time
+        if (gameSpeed < 9) gameSpeed += 0.1;
+      }
+
+      obstacles.forEach(obs => {
+        obs.x -= gameSpeed;
+        if (!obs.scored && obs.x + obs.w < cat.x) {
+          obs.scored = true;
+          score++;
+          scoreEl.textContent = score;
+        }
+      });
+      obstacles = obstacles.filter(o => o.x > -30);
+
+      // Collision
+      for (const obs of obstacles) {
+        if (collides(cat, obs)) {
+          gameOver();
+          return;
+        }
+      }
+
+      // Particles update
+      particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+      });
+      particles = particles.filter(p => p.life > 0);
+
+      // Draw
+      drawGround();
+      obstacles.forEach(drawCucumber);
+      drawCat();
+      drawParticles();
+
+      frame++;
+      requestAnimationFrame(loop);
+    }
+
+    // Draw initial screen
+    ctx.fillStyle = '#0f3460';
+    ctx.fillRect(0, 0, 600, 300);
+    drawStars();
+    drawGround();
+    ctx.fillStyle = '#ffa502';
+    ctx.font = '700 28px Fredoka';
+    ctx.textAlign = 'center';
+    ctx.fillText('🐱 Presiona JUGAR', 300, 140);
+    ctx.fillStyle = '#a0a0b0';
+    ctx.font = '400 16px Fredoka';
+    ctx.fillText('Esquiva los pepinos 🥒', 300, 175);
+    ctx.textAlign = 'start';
+  </script>
+</body>
+</html>
